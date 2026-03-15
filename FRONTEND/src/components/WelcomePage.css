@@ -1,63 +1,61 @@
-.welcome-page {
-  position: relative;
-  width: 100%;
+.welcome-container {
   height: 100vh;
-  background: url("/assets/mgm_hospital_bg.png") center/cover no-repeat; /* your generated background image */
+  width: 100%;
+  background-image: url("/assests/mgm_hospital_bg.jpeg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   display: flex;
-  justify-content: center;
   align-items: center;
-  flex-direction: column;
-  color: white;
-  text-align: center;
+  justify-content: center;
 }
 
 .overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.4); /* dark overlay to make text readable */
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
-.logo {
-  position: absolute;
-  top: 20px;
-  width: 150px;
-  height: auto;
+.hospital-logo {
+  width: 140px;
+  margin-bottom: 25px;
 }
 
-.welcome-message {
-  position: relative;
-  z-index: 2;
+.welcome-card {
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  padding: 40px;
+  border-radius: 15px;
+  text-align: center;
+  color: white;
+  width: 420px;
 }
 
-.welcome-message h1 {
-  font-size: 3rem;
-  margin-bottom: 0.5rem;
+.welcome-title {
+  font-size: 32px;
+  font-weight: bold;
+  margin-bottom: 15px;
 }
 
-.welcome-message h2 {
-  font-size: 2rem;
-  margin-bottom: 1rem;
-}
-
-.welcome-message p {
-  font-size: 1.2rem;
-  margin-bottom: 2rem;
+.welcome-text {
+  font-size: 16px;
+  margin-bottom: 25px;
 }
 
 .login-button {
-  padding: 0.8rem 2rem;
-  font-size: 1.2rem;
+  padding: 12px 30px;
+  background: #2563eb;
+  color: white;
   border: none;
   border-radius: 8px;
+  font-size: 16px;
   cursor: pointer;
-  background-color: #ff9800;
-  color: white;
-  transition: background-color 0.3s;
 }
 
 .login-button:hover {
-  background-color: #e68900;
+  background: #1e40af;
 }

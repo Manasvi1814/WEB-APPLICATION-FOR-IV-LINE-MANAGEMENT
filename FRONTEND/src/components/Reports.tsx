@@ -1,419 +1,477 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
-import { exportToPDF, exportToExcel, ExportData } from './ExportUtils';
-import { 
-  Calendar,
-  Download,
-  FileText,
-  Users,
-  Activity,
-  TrendingUp,
-  AlertCircle,
-  CheckCircle,
-  BarChart3,
-  Filter,
-  RefreshCw
-} from 'lucide-react';
+// src/components/Reports.tsx
+import React, { useState, useRef } from "react";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
+import type { Report } from "../types";
+import * as XLSX from "xlsx";
+import generatePDF from "react-to-pdf";
 
-interface ReportData {
-  totalPatients: number;
-  activeIVLines: number;
-  dailyInsertions: number;
-  successRate: number;
-  totalDeviceDays: number;
-  averagePhlebitisScore: number;
-  efficiencyScore: number;
-  infectionRate: number;
-}
+const ADMIN_PIN = "1234"; // TODO: move to env/secure storage
 
 const Reports: React.FC = () => {
-  const { user } = useAuth();
-  const [reportData, setReportData] = useState<ReportData>({
-    totalPatients: 0,
-    activeIVLines: 0,
-    dailyInsertions: 0,
-    successRate: 0,
-    totalDeviceDays: 0,
-    averagePhlebitisScore: 0,
-    efficiencyScore: 0,
-    infectionRate: 0
-  });
-  const [dateRange, setDateRange] = useState({
-    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
-  });
-  const [patients, setPatients] = useState([]);
-  const [ivLines, setIvLines] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { department } = useAuth();
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [pinInput, setPinInput] = useState("");
 
-  useEffect(() => {
-    fetchReportData();
-  }, [dateRange, user]);
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
 
-  const fetchReportData = async () => {
-    try {
-      setIsLoading(true);
-      
-      // Fetch patients
-      const { data: patientsData } = await supabase
-        .from('patients')
-        .select(`
-          *,
-          department:departments(name)
-        `)
-        .eq('department_id', user?.department_id)
-        .gte('created_at', dateRange.start)
-        .lte('created_at', dateRange.end + 'T23:59:59');
+  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState<Report | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-      // Fetch IV lines
-      const { data: ivLinesData } = await supabase
-        .from('iv_lines')
-        .select(`
-          *,
-          patient:patients!inner(department_id, patient_id)
-        `)
-        .eq('patient.department_id', user?.department_id)
-        .gte('insertion_date', dateRange.start)
-        .lte('insertion_date', dateRange.end + 'T23:59:59');
+  // ref for PDF export
+  const reportRef = useRef<HTMLDivElement | null>(null);
 
-      setPatients(patientsData || []);
-      setIvLines(ivLinesData || []);
-
-      // Calculate metrics
-      const totalPatients = patientsData?.length || 0;
-      const activeIVLines = ivLinesData?.filter(line => line.status === 'active').length || 0;
-      const dailyInsertions = ivLinesData?.length || 0;
-      
-      // Calculate success rate (first attempt success)
-      const successfulAttempts = ivLinesData?.filter(line => line.cannula_count === 1).length || 0;
-      const successRate = dailyInsertions > 0 ? (successfulAttempts / dailyInsertions) * 100 : 0;
-
-      // Calculate device days
-      let totalDeviceDays = 0;
-      ivLinesData?.forEach(line => {
-        const insertionDate = new Date(line.insertion_date);
-        const removalDate = line.removal_date ? new Date(line.removal_date) : new Date();
-        const days = Math.ceil((removalDate.getTime() - insertionDate.getTime()) / (1000 * 60 * 60 * 24));
-        totalDeviceDays += Math.max(1, days);
-      });
-
-      // Calculate average phlebitis score
-      const totalPhlebitisScore = ivLinesData?.reduce((sum, line) => sum + (line.phlebitis_score || 0), 0) || 0;
-      const averagePhlebitisScore = dailyInsertions > 0 ? totalPhlebitisScore / dailyInsertions : 0;
-
-      // Calculate infection rate (per 1000 device days)
-      const infections = ivLinesData?.filter(line => line.phlebitis_score >= 3).length || 0;
-      const infectionRate = totalDeviceDays > 0 ? (infections / totalDeviceDays) * 1000 : 0;
-
-      // Calculate efficiency score
-      const avgTimePerInsertion = ivLinesData?.reduce((sum, line) => sum + (line.time_taken_minutes || 0), 0) / (dailyInsertions || 1);
-      const efficiencyScore = Math.max(0, 100 - (avgTimePerInsertion - 5) * 2);
-
-      setReportData({
-        totalPatients,
-        activeIVLines,
-        dailyInsertions,
-        successRate: Math.round(successRate * 10) / 10,
-        totalDeviceDays,
-        averagePhlebitisScore: Math.round(averagePhlebitisScore * 10) / 10,
-        efficiencyScore: Math.round(efficiencyScore * 10) / 10,
-        infectionRate: Math.round(infectionRate * 10) / 10
-      });
-    } catch (error) {
-      console.error('Error fetching report data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleExport = async (format: 'pdf' | 'excel') => {
-    const exportData: ExportData = {
-      patients: patients.map((patient: any) => ({
-        patient_id: patient.patient_id,
-        department: patient.department?.name || 'N/A',
-        status: patient.status,
-        admission_date: patient.created_at
-      })),
-      ivLines: ivLines.map((line: any) => ({
-        patient_id: line.patient?.patient_id || 'N/A',
-        iv_type: line.iv_type,
-        insertion_site: line.insertion_site,
-        insertion_date: line.insertion_date,
-        removal_date: line.removal_date,
-        phlebitis_score: line.phlebitis_score,
-        status: line.status,
-        time_taken: line.time_taken_minutes,
-        cannulas_used: line.cannula_count
-      })),
-      reportData,
-      dateRange
-    };
-
-    try {
-      if (format === 'pdf') {
-        await exportToPDF(exportData, `IV_Management_Report_${dateRange.start}_to_${dateRange.end}`);
-      } else {
-        await exportToExcel(exportData, `IV_Management_Report_${dateRange.start}_to_${dateRange.end}`);
-      }
-    } catch (error) {
-      console.error(`Error exporting to ${format}:`, error);
-      alert(`Failed to export to ${format.toUpperCase()}. Please try again.`);
-    }
-  };
-
-  if (isLoading) {
+  if (!department) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
+      <div className="p-4 text-sm text-red-600">
+        Department not found. Please log in again.
       </div>
     );
   }
 
+  const handleUnlock = () => {
+    if (pinInput === ADMIN_PIN) {
+      setIsUnlocked(true);
+      setErrorMsg(null);
+    } else {
+      setErrorMsg("Incorrect admin PIN.");
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!startDate || !endDate) {
+      setErrorMsg("Please select both start and end dates.");
+      return;
+    }
+
+    setErrorMsg(null);
+    setLoading(true);
+
+    const { error: rpcError } = await supabase.rpc(
+      "generate_report_for_department",
+      {
+        p_department_id: department.id,
+        p_start_date: startDate,
+        p_end_date: endDate,
+      }
+    );
+
+    if (rpcError) {
+      console.error("RPC error:", rpcError.message);
+      setErrorMsg(rpcError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data, error: selectError } = await supabase
+      .from("reports")
+      .select("*")
+      .eq("department_id", department.id)
+      .eq("report_start_date", startDate)
+      .eq("report_end_date", endDate)
+      .single<Report>();
+
+    setLoading(false);
+
+    if (selectError) {
+      console.error("Select report error:", selectError.message);
+      setErrorMsg(selectError.message);
+      setReport(null);
+      return;
+    }
+
+    setReport(data);
+  };
+
+  const handleDownloadExcel = () => {
+    if (!report) return;
+
+    const rows = [
+      {
+        Section: "Denominators",
+        Metric: "Total accesses",
+        Value: report.total_peripheral_venous_access,
+      },
+      {
+        Section: "Denominators",
+        Metric: "Total patients",
+        Value: report.total_patients,
+      },
+      {
+        Section: "Denominators",
+        Metric: "Total patient days",
+        Value: report.total_patient_days,
+      },
+      {
+        Section: "Phlebitis & extravasation",
+        Metric: "Phlebitis cases",
+        Value: report.phlebitis_cases,
+      },
+      {
+        Section: "Phlebitis & extravasation",
+        Metric: "Phlebitis / access (%)",
+        Value: report.phlebitis_rate_access_percent,
+      },
+      {
+        Section: "Phlebitis & extravasation",
+        Metric: "Phlebitis / patient days (%)",
+        Value: report.phlebitis_rate_patient_days_percent,
+      },
+      {
+        Section: "Phlebitis & extravasation",
+        Metric: "Extravasation cases",
+        Value: report.extravasation_cases,
+      },
+      {
+        Section: "Phlebitis & extravasation",
+        Metric: "Extravasation / patient days (%)",
+        Value: report.extravasation_rate_percent,
+      },
+      {
+        Section: "Insertion success",
+        Metric: "First prick success count",
+        Value: report.first_prick_success_count,
+      },
+      {
+        Section: "Insertion success",
+        Metric: "First prick success (%)",
+        Value: report.first_prick_success_percent,
+      },
+      {
+        Section: "Insertion success",
+        Metric: "Second prick success count",
+        Value: report.second_prick_success_count,
+      },
+      {
+        Section: "Insertion success",
+        Metric: "Second prick success (%)",
+        Value: report.second_prick_success_percent,
+      },
+      {
+        Section: "Escalation & cost",
+        Metric: "Escalation to anaesthetics count",
+        Value: report.escalation_to_anaesthetics_count,
+      },
+      {
+        Section: "Escalation & cost",
+        Metric: "Escalation to anaesthetics (%)",
+        Value: report.escalation_to_anaesthetics_percent,
+      },
+      {
+        Section: "Escalation & cost",
+        Metric: "Total insertion packages",
+        Value: report.total_insertion_packages,
+      },
+      {
+        Section: "Escalation & cost",
+        Metric: "Total insertion cost",
+        Value: report.total_insertion_cost,
+      },
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+    const filename = `report_${department.name || "dept"}_${startDate}_${endDate}.xlsx`;
+    XLSX.writeFile(workbook, filename);
+  };
+
+  const handleDownloadPDF = () => {
+    if (!reportRef.current || !report) return;
+
+    generatePDF(() => reportRef.current!, {
+      filename: `report_${department.name || "dept"}_${startDate}_${endDate}.pdf`,
+    });
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
+    <div className="mx-auto max-w-5xl space-y-6 p-4">
+      <div className="flex items-center justify-between border-b pb-3">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Reports & Analytics</h1>
-          <p className="text-gray-600">Department: {user?.department?.name}</p>
-        </div>
-        <div className="flex space-x-3">
-          <button
-            onClick={() => handleExport('excel')}
-            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Export Excel
-          </button>
-          <button
-            onClick={() => handleExport('pdf')}
-            className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-          >
-            <FileText className="w-4 h-4 mr-2" />
-            Export PDF
-          </button>
-          <button
-            onClick={fetchReportData}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </button>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Department Reports
+          </h1>
+          <p className="text-xs text-gray-500">
+            Department:{" "}
+            <span className="font-medium">{department.name || "Current"}</span>
+          </p>
         </div>
       </div>
 
-      {/* Date Range Filter */}
-      <div className="bg-white p-6 rounded-lg shadow-md">
-        <div className="flex items-center space-x-4">
-          <Filter className="w-5 h-5 text-gray-400" />
-          <div className="flex items-center space-x-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-              <input
-                type="date"
-                value={dateRange.start}
-                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-              <input
-                type="date"
-                value={dateRange.end}
-                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
+      {/* Admin lock */}
+      {!isUnlocked && (
+        <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-semibold text-red-800">
+            Admin access required
+          </p>
+          <p className="text-xs text-red-700">
+            Only department admins can view and generate reports.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="password"
+              className="w-40 rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="Enter admin PIN"
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+            />
+            <button
+              onClick={handleUnlock}
+              className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+            >
+              Unlock
+            </button>
           </div>
+          {errorMsg && (
+            <p className="text-xs text-red-700">{errorMsg}</p>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Total Patients</p>
-              <p className="text-3xl font-bold text-gray-900">{reportData.totalPatients}</p>
-            </div>
-            <Users className="w-8 h-8 text-blue-600" />
-          </div>
-        </div>
+      {isUnlocked && (
+        <>
+          {/* Date range + actions */}
+          <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h2 className="text-sm font-semibold text-gray-800">
+              Generate report for date range
+            </h2>
 
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Active IV Lines</p>
-              <p className="text-3xl font-bold text-green-600">{reportData.activeIVLines}</p>
-            </div>
-            <Activity className="w-8 h-8 text-green-600" />
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Success Rate</p>
-              <p className="text-3xl font-bold text-purple-600">{reportData.successRate}%</p>
-            </div>
-            <TrendingUp className="w-8 h-8 text-purple-600" />
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Device Days</p>
-              <p className="text-3xl font-bold text-orange-600">{reportData.totalDeviceDays}</p>
-            </div>
-            <Calendar className="w-8 h-8 text-orange-600" />
-          </div>
-        </div>
-      </div>
-
-      {/* Quality Indicators */}
-      <div className="bg-white rounded-lg shadow-md">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-            <BarChart3 className="w-5 h-5 mr-2 text-blue-600" />
-            Quality Indicators
-          </h2>
-        </div>
-        
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <div className="flex items-center justify-center mb-2">
-                {reportData.averagePhlebitisScore <= 1 ? (
-                  <CheckCircle className="w-8 h-8 text-green-600" />
-                ) : (
-                  <AlertCircle className="w-8 h-8 text-red-600" />
-                )}
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">
+                  Start date
+                </label>
+                <input
+                  type="date"
+                  className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
               </div>
-              <p className="text-2xl font-bold text-gray-900">{reportData.averagePhlebitisScore}</p>
-              <p className="text-sm text-gray-600">Average Phlebitis Score</p>
-              <p className="text-xs text-gray-500 mt-1">Target: ≤ 1.0</p>
-            </div>
-
-            <div className="text-center p-4 bg-green-50 rounded-lg">
-              <div className="flex items-center justify-center mb-2">
-                {reportData.infectionRate <= 2 ? (
-                  <CheckCircle className="w-8 h-8 text-green-600" />
-                ) : (
-                  <AlertCircle className="w-8 h-8 text-red-600" />
-                )}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">
+                  End date
+                </label>
+                <input
+                  type="date"
+                  className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
               </div>
-              <p className="text-2xl font-bold text-gray-900">{reportData.infectionRate}</p>
-              <p className="text-sm text-gray-600">Infection Rate</p>
-              <p className="text-xs text-gray-500 mt-1">Per 1000 device days (Target: ≤ 2.0)</p>
-            </div>
-
-            <div className="text-center p-4 bg-purple-50 rounded-lg">
-              <div className="flex items-center justify-center mb-2">
-                {reportData.efficiencyScore >= 80 ? (
-                  <CheckCircle className="w-8 h-8 text-green-600" />
-                ) : (
-                  <AlertCircle className="w-8 h-8 text-yellow-600" />
-                )}
+              <div className="flex items-end">
+                <button
+                  onClick={handleGenerate}
+                  disabled={loading}
+                  className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                >
+                  {loading ? "Generating..." : "Generate report"}
+                </button>
               </div>
-              <p className="text-2xl font-bold text-gray-900">{reportData.efficiencyScore}</p>
-              <p className="text-sm text-gray-600">Efficiency Score</p>
-              <p className="text-xs text-gray-500 mt-1">Target: ≥ 80</p>
             </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Detailed Tables */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Patients */}
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Recent Patients</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Patient ID
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Admission
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {patients.slice(0, 5).map((patient: any) => (
-                  <tr key={patient.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {patient.patient_id}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        patient.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {patient.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(patient.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+            {/* Download buttons: only visible after a report is loaded */}
+            {report && (
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-200 mt-2">
+                <button
+                  onClick={handleDownloadExcel}
+                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+                >
+                  Download Excel
+                </button>
+                <button
+                  onClick={handleDownloadPDF}
+                  className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
+                >
+                  Download PDF
+                </button>
+              </div>
+            )}
 
-        {/* Recent IV Lines */}
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Recent IV Lines</h3>
+            {errorMsg && (
+              <p className="text-xs text-red-600">{errorMsg}</p>
+            )}
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Patient
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Type
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {ivLines.slice(0, 5).map((line: any) => (
-                  <tr key={line.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {line.patient?.patient_id || 'N/A'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">
-                      {line.iv_type}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        line.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {line.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+          {/* Report display */}
+          <div
+            ref={reportRef}
+            className="space-y-4 rounded-lg border border-gray-200 bg-white p-4"
+          >
+            <h2 className="text-sm font-semibold text-gray-800">
+              Report summary
+            </h2>
+
+            {!report ? (
+              <p className="text-xs text-gray-500">
+                No report loaded. Select a date range and click "Generate
+                report".
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-gray-500">
+                  Period:{" "}
+                  <span className="font-medium">
+                    {report.report_start_date} to {report.report_end_date}
+                  </span>
+                </p>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Denominators */}
+                  <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                    <h3 className="mb-2 text-xs font-semibold text-gray-700">
+                      Denominators
+                    </h3>
+                    <table className="w-full text-xs text-gray-700">
+                      <tbody>
+                        <tr>
+                          <td className="py-0.5 pr-2">Total accesses</td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.total_peripheral_venous_access}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">Total patients</td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.total_patients}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">Total patient days</td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.total_patient_days}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Phlebitis & extravasation */}
+                  <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                    <h3 className="mb-2 text-xs font-semibold text-gray-700">
+                      Phlebitis & extravasation
+                    </h3>
+                    <table className="w-full text-xs text-gray-700">
+                      <tbody>
+                        <tr>
+                          <td className="py-0.5 pr-2">Phlebitis cases</td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.phlebitis_cases}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            Phlebitis / access (%)
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.phlebitis_rate_access_percent.toFixed(2)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            Phlebitis / patient days (%)
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.phlebitis_rate_patient_days_percent.toFixed(
+                              2
+                            )}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            Extravasation cases
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.extravasation_cases}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            Extravasation / patient days (%)
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.extravasation_rate_percent.toFixed(2)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Insertion success */}
+                  <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                    <h3 className="mb-2 text-xs font-semibold text-gray-700">
+                      Insertion success
+                    </h3>
+                    <table className="w-full text-xs text-gray-700">
+                      <tbody>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            First prick success
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.first_prick_success_count} (
+                            {report.first_prick_success_percent.toFixed(2)}%)
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            Second prick success
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.second_prick_success_count} (
+                            {report.second_prick_success_percent.toFixed(2)}%)
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Escalation & cost */}
+                  <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                    <h3 className="mb-2 text-xs font-semibold text-gray-700">
+                      Escalation & cost
+                    </h3>
+                    <table className="w-full text-xs text-gray-700">
+                      <tbody>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            Escalation to anaesthetics
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.escalation_to_anaesthetics_count} (
+                            {report.escalation_to_anaesthetics_percent.toFixed(
+                              2
+                            )}
+                            %)
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            Total insertion packages
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            {report.total_insertion_packages}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2">
+                            Total insertion cost
+                          </td>
+                          <td className="py-0.5 text-right font-semibold">
+                            ₹{report.total_insertion_cost.toFixed(2)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 };

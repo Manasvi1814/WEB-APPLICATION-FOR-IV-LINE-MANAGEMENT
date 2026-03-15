@@ -69,12 +69,35 @@ export interface AuthContextType {
 }
 
 
-export interface ReportData {
-  totalPatients: number;
-  activeIVLines: number;
-  dailyInsertions: number;
-  successRate: number;
-  totalDeviceDays: number;
-  averagePhlebitisScore: number;
-  efficiencyScore: number;
+export interface Report {
+  id: string;
+  report_start_date: string;
+  report_end_date: string;
+  department_id: string;
+
+  total_peripheral_venous_access: number;
+  total_patients: number;
+  total_patient_days: number;
+
+  phlebitis_cases: number;
+  phlebitis_rate_access_percent: number;
+  phlebitis_rate_patient_days_percent: number;
+
+  extravasation_cases: number;
+  extravasation_rate_percent: number;
+
+  first_prick_success_count: number;
+  first_prick_success_percent: number;
+
+  second_prick_success_count: number;
+  second_prick_success_percent: number;
+
+  escalation_to_anaesthetics_count: number;
+  escalation_to_anaesthetics_percent: number;
+
+  total_insertion_packages: number;
+  total_insertion_cost: number;
+
+  created_at?: string;
+  updated_at?: string;
 }

@@ -26,6 +26,11 @@ const PatientManagement: React.FC = () => {
   const [showIVLineModal, setShowIVLineModal] = useState(false);
   const [modalPatient, setModalPatient] = useState<Patient | null>(null);
 
+  // per‑patient discharge date input
+  const [dischargeDates, setDischargeDates] = useState<Record<string, string>>(
+    {}
+  );
+
   // Fetch patients + IV records
   const fetchData = async () => {
     if (!department) return;
@@ -35,7 +40,9 @@ const PatientManagement: React.FC = () => {
     try {
       const { data: patientsData, error: patientsError } = await supabase
         .from("patients")
-        .select("id, patient_id, current_department_id, created_at, updated_at")
+        .select(
+          "id, patient_id, current_department_id, created_at, updated_at, admission_date, discharge_date"
+        )
         .eq("current_department_id", department.id)
         .order("created_at", { ascending: false });
 
@@ -90,6 +97,30 @@ const PatientManagement: React.FC = () => {
     setShowIVLineModal(true);
   };
 
+  // discharge handler using chosen date
+  const handleDischarge = async (patientId: string) => {
+    const chosen = dischargeDates[patientId];
+    if (!chosen) {
+      alert("Please select a discharge date first.");
+      return;
+    }
+
+    if (!window.confirm("Mark this patient as discharged on this date?")) return;
+
+    const { error } = await supabase
+      .from("patients")
+      .update({ discharge_date: chosen })
+      .eq("id", patientId);
+
+    if (error) {
+      console.error("Discharge error:", error.message);
+      alert(error.message);
+      return;
+    }
+
+    await fetchData();
+  };
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-64 space-y-3">
@@ -101,7 +132,6 @@ const PatientManagement: React.FC = () => {
 
   return (
     <div className="space-y-6">
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">
@@ -134,7 +164,6 @@ const PatientManagement: React.FC = () => {
 
       {/* Patient List */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-
         <div className="p-6 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">
             Patients ({filteredPatients.length})
@@ -148,8 +177,8 @@ const PatientManagement: React.FC = () => {
         ) : (
           <div className="divide-y divide-gray-200">
             {filteredPatients.map((patient) => {
-
               const patientIVs = ivRecords[patient.id] || [];
+              const isDischarged = !!patient.discharge_date;
 
               return (
                 <div
@@ -157,16 +186,33 @@ const PatientManagement: React.FC = () => {
                   className="p-6 hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex justify-between items-start">
-
                     <div className="flex-1">
-
                       <h4 className="text-lg font-semibold text-gray-900">
                         Patient ID: {patient.patient_id}
                       </h4>
 
+                      {/* Admission / discharge info */}
+                      <p className="text-sm text-gray-600 mt-1">
+                        Admission:{" "}
+                        {patient.admission_date
+                          ? new Date(
+                              patient.admission_date
+                            ).toLocaleDateString()
+                          : "N/A"}
+                        {" • "}
+                        Status: {isDischarged ? "Discharged" : "Admitted"}
+                      </p>
+                      {isDischarged && patient.discharge_date && (
+                        <p className="text-xs text-gray-500">
+                          Discharged:{" "}
+                          {new Date(
+                            patient.discharge_date
+                          ).toLocaleDateString()}
+                        </p>
+                      )}
+
                       {patientIVs.length > 0 ? (
                         <div className="mt-2 space-y-1">
-
                           {patientIVs.map((iv) => (
                             <div
                               key={iv.id}
@@ -191,7 +237,6 @@ const PatientManagement: React.FC = () => {
                               </span>
                             </div>
                           ))}
-
                         </div>
                       ) : (
                         <div className="mt-2">
@@ -205,16 +250,39 @@ const PatientManagement: React.FC = () => {
                         Added:{" "}
                         {new Date(patient.created_at).toLocaleDateString()}
                       </p>
-
                     </div>
 
-                    <button
-                      onClick={() => handleOpenIVModal(patient)}
-                      className="ml-4 bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 text-sm"
-                    >
-                      {patientIVs.length > 0 ? "Manage IV" : "Insert IV"}
-                    </button>
+                    <div className="ml-4 flex flex-col items-end gap-2">
+                      <button
+                        onClick={() => handleOpenIVModal(patient)}
+                        className="bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 text-sm"
+                      >
+                        {patientIVs.length > 0 ? "Manage IV" : "Insert IV"}
+                      </button>
 
+                      {/* Discharge controls */}
+                      {!isDischarged && (
+                        <div className="flex flex-col items-end gap-1">
+                          <input
+                            type="date"
+                            className="border border-gray-300 rounded-md px-2 py-1 text-xs"
+                            value={dischargeDates[patient.id] || ""}
+                            onChange={(e) =>
+                              setDischargeDates((prev) => ({
+                                ...prev,
+                                [patient.id]: e.target.value,
+                              }))
+                            }
+                          />
+                          <button
+                            onClick={() => handleDischarge(patient.id)}
+                            className="px-3 py-1.5 text-xs rounded-md bg-red-600 text-white hover:bg-red-700"
+                          >
+                            Set discharge
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -229,13 +297,10 @@ const PatientManagement: React.FC = () => {
           isOpen={showPatientModal}
           onClose={() => setShowPatientModal(false)}
           onSave={(createdPatient) => {
-
             setPatients([createdPatient, ...patients]);
             setModalPatient(createdPatient);
-
             setShowIVLineModal(true);
             setShowPatientModal(false);
-
           }}
         />
       )}
@@ -252,7 +317,6 @@ const PatientManagement: React.FC = () => {
           onSave={fetchData}
         />
       )}
-
     </div>
   );
 };

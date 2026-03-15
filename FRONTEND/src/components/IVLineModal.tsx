@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import IVMonitoring from "./IVMonitoring"; // <— NEW
+import IVMonitoring from "./IVMonitoring";
 
 interface IVRecord {
   id: string;
@@ -30,6 +30,9 @@ interface IVRecord {
   remarks?: string;
   post_removal_status?: string;
   device_days?: number;
+
+  packages_used?: number;
+  escalated_to_anaesthetics?: boolean;
 }
 
 interface Props {
@@ -60,6 +63,8 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
     result: "successful",
     unsuccessful_reason: "",
     insertion_pain: 0,
+    packages_used: 1,
+    escalated_to_anaesthetics: false,
   });
 
   const [removalData, setRemovalData] = useState({
@@ -105,10 +110,6 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
   };
 
   const handleInsertIV = async () => {
-    console.log("Insert IV clicked");
-    console.log("USER:", department);
-    console.log("PATIENT:", patient);
-
     if (!department || !patient) return;
 
     if (!insertionData.pvc_size) {
@@ -144,6 +145,9 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
       insertion_pain: insertionData.insertion_pain,
       insertion_date: new Date().toISOString(),
       status: "active",
+
+      packages_used: insertionData.packages_used,
+      escalated_to_anaesthetics: insertionData.escalated_to_anaesthetics,
     };
 
     const { data, error } = await supabase
@@ -169,6 +173,8 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
       result: "successful",
       unsuccessful_reason: "",
       insertion_pain: 0,
+      packages_used: 1,
+      escalated_to_anaesthetics: false,
     });
 
     await fetchIVLines();
@@ -296,7 +302,6 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
                     )}
                   </div>
 
-                  {/* NEW: actions */}
                   <span className="flex flex-col items-end gap-1 text-xs font-medium">
                     {line.status === "active" && (
                       <button
@@ -462,6 +467,48 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
                   }
                 />
               </div>
+
+              {/* Packages used */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">
+                  Packages used
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={insertionData.packages_used}
+                  onChange={(e) =>
+                    setInsertionData({
+                      ...insertionData,
+                      packages_used:
+                        parseInt(e.target.value, 10) || 1,
+                    })
+                  }
+                />
+              </div>
+
+              {/* Escalated to anaesthetics */}
+              <div className="flex items-center gap-2 md:col-span-2">
+                <input
+                  id="escalated_to_anaesthetics"
+                  type="checkbox"
+                  className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                  checked={insertionData.escalated_to_anaesthetics}
+                  onChange={(e) =>
+                    setInsertionData({
+                      ...insertionData,
+                      escalated_to_anaesthetics: e.target.checked,
+                    })
+                  }
+                />
+                <label
+                  htmlFor="escalated_to_anaesthetics"
+                  className="text-xs font-medium text-gray-700"
+                >
+                  Escalated to anaesthetics
+                </label>
+              </div>
             </div>
 
             <div className="flex justify-end pt-2">
@@ -530,7 +577,7 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
                   </div>
                 </div>
 
-                {/* Reason for removal (radio list) */}
+                {/* Reason for removal */}
                 <div className="space-y-2 pt-2">
                   <p className="text-xs font-medium text-gray-700">
                     Reason for Removal
@@ -691,7 +738,7 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
 
                   <p className="text-xs text-gray-600">
                     Device days:{" "}
-                    {selectedLine.insertion_date &&
+                    {selectedLine?.insertion_date &&
                       calculateDeviceDays(selectedLine.insertion_date)}
                   </p>
                 </div>
