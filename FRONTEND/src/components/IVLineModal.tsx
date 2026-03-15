@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
+import IVMonitoring from "./IVMonitoring"; // <— NEW
 
 interface IVRecord {
   id: string;
@@ -17,7 +18,6 @@ interface IVRecord {
   insertion_date?: string;
   status?: "active" | "removed";
 
-  removal_by?: string;
   removal_reason?: string;
   removal_date?: string;
 
@@ -46,6 +46,10 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
   const [selectedLine, setSelectedLine] = useState<IVRecord | null>(null);
 
   const [loading, setLoading] = useState(false);
+
+  // monitoring modal state
+  const [monitoringOpen, setMonitoringOpen] = useState(false);
+  const [monitoringLine, setMonitoringLine] = useState<IVRecord | null>(null);
 
   const [insertionData, setInsertionData] = useState({
     pvc_size: "",
@@ -102,12 +106,11 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
 
   const handleInsertIV = async () => {
     console.log("Insert IV clicked");
-      console.log("USER:", department);
-  console.log("PATIENT:", patient);
+    console.log("USER:", department);
+    console.log("PATIENT:", patient);
 
-    if (!department|| !patient) return;
+    if (!department || !patient) return;
 
-    // basic checks
     if (!insertionData.pvc_size) {
       alert("Please select PVC size.");
       return;
@@ -123,10 +126,8 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
 
     setLoading(true);
 
-    // build payload without undefined department_id
     const payload: any = {
       patient_id: patient.id,
-     
 
       pvc_size: insertionData.pvc_size,
       vein_quality: insertionData.vein_quality,
@@ -145,9 +146,6 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
       status: "active",
     };
 
-    // only add department_id if it really exists on user
-    
-
     const { data, error } = await supabase
       .from("iv_records")
       .insert([payload]);
@@ -162,7 +160,6 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
       return;
     }
 
-    // reset + refresh
     setInsertionData({
       pvc_size: "",
       vein_quality: "good",
@@ -188,7 +185,6 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
     const { error } = await supabase
       .from("iv_records")
       .update({
-        removal_by: department.id,
         removal_date: new Date().toISOString(),
 
         removal_reason: removalData.removal_reason,
@@ -299,8 +295,32 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
                       </p>
                     )}
                   </div>
-                  <span className="text-xs font-medium text-blue-600">
-                    {line.status === "active" ? "Manage" : "View"}
+
+                  {/* NEW: actions */}
+                  <span className="flex flex-col items-end gap-1 text-xs font-medium">
+                    {line.status === "active" && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMonitoringLine(line);
+                          setMonitoringOpen(true);
+                        }}
+                        className="text-blue-600 hover:underline"
+                      >
+                        Monitor
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedLine(line);
+                      }}
+                      className="text-red-600 hover:underline"
+                    >
+                      {line.status === "active" ? "Remove" : "View"}
+                    </button>
                   </span>
                 </button>
               ))}
@@ -467,7 +487,7 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
                   {selectedLine.insertion_date &&
                     new Date(
                       selectedLine.insertion_date
-                    ).toLocaleDateString()}
+                    ).toLocaleString()}
                 </span>
               )}
             </div>
@@ -478,20 +498,175 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
               </p>
             ) : (
               <>
-                <div className="space-y-3">
+                {/* Top row: removal date + device days */}
+                <div className="grid gap-3 md:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-700">
-                      Removal Reason
+                      Removal Date
                     </label>
                     <input
-                      placeholder="e.g. Therapy completed"
+                      type="text"
+                      readOnly
+                      className="w-full rounded-md border border-gray-300 bg-gray-100 px-2 py-2 text-sm"
+                      value={new Date().toLocaleString()}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">
+                      Device Days (auto)
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      className="w-full rounded-md border border-gray-300 bg-gray-100 px-2 py-2 text-sm"
+                      value={
+                        selectedLine.insertion_date
+                          ? calculateDeviceDays(
+                              selectedLine.insertion_date
+                            )
+                          : "-"
+                      }
+                    />
+                  </div>
+                </div>
+
+                {/* Reason for removal (radio list) */}
+                <div className="space-y-2 pt-2">
+                  <p className="text-xs font-medium text-gray-700">
+                    Reason for Removal
+                    <span className="text-red-500">*</span>
+                  </p>
+                  <div className="grid gap-1 text-xs text-gray-800 md:grid-cols-2">
+                    {[
+                      "Completion of prescribed therapy",
+                      "High VIP score",
+                      "Extravasation",
+                      "PVC dislodgement",
+                      "Phlebitis",
+                      "Infiltration",
+                      "Occlusion",
+                      "Patient's wish",
+                    ].map((label) => (
+                      <label
+                        key={label}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <input
+                          type="radio"
+                          name="removal_reason"
+                          className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                          checked={
+                            removalData.removal_reason === label
+                          }
+                          onChange={() =>
+                            setRemovalData((prev) => ({
+                              ...prev,
+                              removal_reason: label,
+                              pvc_dislodgement:
+                                label === "PVC dislodgement"
+                                  ? true
+                                  : prev.pvc_dislodgement,
+                              patient_wish:
+                                label === "Patient's wish"
+                                  ? true
+                                  : prev.patient_wish,
+                            }))
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Remarks dropdowns */}
+                <div className="grid gap-3 pt-3 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">
+                      Any vesicant drugs?
+                    </label>
+                    <select
                       className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      value={removalData.removal_reason}
+                      value={removalData.vesicant_drugs ? "yes" : "no"}
                       onChange={(e) =>
-                        setRemovalData({
-                          ...removalData,
-                          removal_reason: e.target.value,
-                        })
+                        setRemovalData((prev) => ({
+                          ...prev,
+                          vesicant_drugs: e.target.value === "yes",
+                        }))
+                      }
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">
+                      Mechanical reason?
+                    </label>
+                    <select
+                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={removalData.mechanical_reason ? "yes" : "no"}
+                      onChange={(e) =>
+                        setRemovalData((prev) => ({
+                          ...prev,
+                          mechanical_reason: e.target.value === "yes",
+                        }))
+                      }
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">
+                      Chemical reason?
+                    </label>
+                    <select
+                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={removalData.chemical_reason ? "yes" : "no"}
+                      onChange={(e) =>
+                        setRemovalData((prev) => ({
+                          ...prev,
+                          chemical_reason: e.target.value === "yes",
+                        }))
+                      }
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">
+                      Cannula matches rate of fluid infused?
+                    </label>
+                    <select
+                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      defaultValue="yes"
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Post-removal status + remarks */}
+                <div className="pt-3 space-y-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">
+                      Post-removal status
+                    </label>
+                    <input
+                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      placeholder="e.g. Inflamed"
+                      value={removalData.post_removal_status}
+                      onChange={(e) =>
+                        setRemovalData((prev) => ({
+                          ...prev,
+                          post_removal_status: e.target.value,
+                        }))
                       }
                     />
                   </div>
@@ -501,49 +676,17 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
                       Remarks
                     </label>
                     <textarea
-                      rows={3}
-                      placeholder="Additional notes"
+                      rows={2}
                       className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      placeholder="Additional notes"
                       value={removalData.remarks}
                       onChange={(e) =>
-                        setRemovalData({
-                          ...removalData,
+                        setRemovalData((prev) => ({
+                          ...prev,
                           remarks: e.target.value,
-                        })
+                        }))
                       }
                     />
-                  </div>
-
-                  <div className="grid gap-2 text-xs text-gray-700 sm:grid-cols-2">
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        checked={removalData.patient_wish}
-                        onChange={(e) =>
-                          setRemovalData({
-                            ...removalData,
-                            patient_wish: e.target.checked,
-                          })
-                        }
-                      />
-                      <span>Patient wish</span>
-                    </label>
-
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        checked={removalData.pvc_dislodgement}
-                        onChange={(e) =>
-                          setRemovalData({
-                            ...removalData,
-                            pvc_dislodgement: e.target.checked,
-                          })
-                        }
-                      />
-                      <span>PVC dislodgement</span>
-                    </label>
                   </div>
 
                   <p className="text-xs text-gray-600">
@@ -567,6 +710,21 @@ const IVLineModal: React.FC<Props> = ({ isOpen, onClose, patient, onSave }) => {
           </div>
         </section>
       </div>
+
+      {/* Monitoring modal */}
+      <IVMonitoring
+        isOpen={monitoringOpen}
+        onClose={() => setMonitoringOpen(false)}
+        ivRecord={
+          monitoringLine
+            ? {
+                id: monitoringLine.id,
+                pvc_size: monitoringLine.pvc_size,
+                vein_site: monitoringLine.vein_site,
+              }
+            : null
+        }
+      />
     </div>
   );
 };
