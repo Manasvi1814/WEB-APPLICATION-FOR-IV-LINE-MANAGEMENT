@@ -69,6 +69,8 @@ export interface AuthContextType {
 }
 
 
+// src/types.ts
+
 export interface Report {
   id: string;
   report_start_date: string;
@@ -97,6 +99,11 @@ export interface Report {
 
   total_insertion_packages: number;
   total_insertion_cost: number;
+
+  // Feedback fields — populated by updated generate_report_for_department
+  total_feedbacks: number;
+  positive_feedbacks: number;
+  feedback_percentage: number;
 
   created_at?: string;
   updated_at?: string;

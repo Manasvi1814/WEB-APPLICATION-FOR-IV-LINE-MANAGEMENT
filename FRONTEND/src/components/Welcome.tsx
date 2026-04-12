@@ -12,15 +12,14 @@ const WelcomePage: React.FC = () => {
   return (
     <div className="welcome-container">
       <div className="overlay">
-
-        {/* MGM Logo */}
-        <img
-          src="/assests/mgm_logo.png"
-          alt="MGM Hospital Logo"
-          className="hospital-logo"
-        />
-
         <div className="welcome-card">
+          {/* MGM Logo in glass card */}
+          <img
+            src="/assests/mgm_logo_original-removebg-preview.png"
+            alt="MGM Hospital Logo"
+            className="hospital-logo card-logo"
+          />
+
           <h1 className="welcome-title">
             MGM Hospital Vashi Dashboard
           </h1>
