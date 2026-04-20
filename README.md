@@ -25,7 +25,7 @@ Key Features
 
 How to run the project
 1. Clone the repository
-   git clone https://github.com/your-repo/iv-monitoring-system.git
+   git clone https://github.com/Manasvi1814/WEB-APPLICATION-FOR-IV-LINE-MANAGEMENT)
    cd iv-monitoring-system
 
 2. Install dependencies
