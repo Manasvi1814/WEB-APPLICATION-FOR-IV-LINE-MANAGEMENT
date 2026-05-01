@@ -52,3 +52,9 @@ Metrics Calculated
 
 Summary
 This system digitizes IV monitoring with department-based access, improving accuracy, tracking, and reporting in hospitals.
+## 👥 Collaborators
+
+- [Aditi Nitin Bangare](https://github.com/aditi999ban)
+- [Lynsey Fernandes](https://github.com/LynseyFernandes)
+- [Kartiki Gorad](https://github.com/kartikigorad)
+- [Manasvi Kadu](https://github.com/Manasvi1814)
