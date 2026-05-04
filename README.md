@@ -1,6 +1,5 @@
-Web Application for IV Line Management– README
+Web Application for IV Line Management
 
-What is this project?
 The IV Monitoring System is a web application used to track intravenous (IV) therapy in hospitals.
 It helps monitor insertions, detect complications, and generate reports.
 
@@ -52,7 +51,7 @@ Metrics Calculated
 
 Summary
 This system digitizes IV monitoring with department-based access, improving accuracy, tracking, and reporting in hospitals.
-## 👥 Collaborators
+## Collaborators
 
 - [Aditi Nitin Bangare](https://github.com/aditi999ban)
 - [Lynsey Fernandes](https://github.com/LynseyFernandes)
